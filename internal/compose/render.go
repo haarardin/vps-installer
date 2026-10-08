@@ -90,7 +90,7 @@ func Render(s spec.Spec, id, dir string, images map[string]string) ([]byte, erro
 			if v.Persistent {
 				c.Command = []string{"redis-server", "--aclfile", "/run/secrets/" + acl, "--appendonly", "yes"}
 			}
-			c.Healthcheck.Test = []string{"CMD-SHELL", "test \"$$(redis-cli --user health ping)\" = PONG"}
+			c.Healthcheck.Test = []string{"CMD-SHELL", "test \"$$(redis-cli --user health --pass '' --no-auth-warning ping)\" = PONG"}
 		}
 		port, path := 5432, "/var/lib/postgresql/data"
 		if v.Template == "redis" {

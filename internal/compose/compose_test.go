@@ -25,6 +25,12 @@ func TestRender(t *testing.T) {
 	if err = json.Unmarshal(b, &f); err != nil {
 		t.Fatal(err)
 	}
+	// redis-cli only sends ACL AUTH when a password argument is present,
+	// even for the deliberately passwordless, PING-only health user.
+	health := strings.Join(f.Services["cache"].Healthcheck.Test, " ")
+	if !strings.Contains(health, "--user health --pass ''") {
+		t.Fatal("healthcheck cannot authenticate its ACL user")
+	}
 	db := f.Services["db"]
 	if !reflect.DeepEqual(db.Ports, []string{"127.0.0.1:5432:5432"}) {
 		t.Fatal(db.Ports)
