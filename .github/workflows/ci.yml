@@ -1,0 +1,45 @@
+name: CI
+on:
+  push:
+    branches: [main, 'feat/**']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Format
+        run: test -z "$(gofmt -l cmd internal integration)"
+      - run: go vet ./...
+      - run: go test -race -count=1 -coverprofile=coverage.out ./...
+      - run: go test ./internal/spec -run='^$' -fuzz=FuzzDecode -fuzztime=10s
+      - run: go build -trimpath -o bin/envctl ./cmd/envctl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: envctl-linux-amd64
+          path: |
+            bin/envctl
+            coverage.out
+  integration:
+    needs: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: docker version && docker compose version
+      - run: ENVCTL_INTEGRATION=1 go test -tags=integration -count=1 -timeout=9m -v ./integration

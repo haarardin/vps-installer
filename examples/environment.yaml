@@ -1,0 +1,13 @@
+api_version: envctl/v1alpha1
+name: backend-dev
+services:
+  - name: database
+    template: postgres
+    version: "17"
+    host_port: 5432
+    persistent: true
+  - name: cache
+    template: redis
+    version: "7"
+    host_port: 6379
+    persistent: false
