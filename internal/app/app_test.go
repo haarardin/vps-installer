@@ -272,3 +272,61 @@ func TestStateWriteFailureAfterRuntimeSuccess(t *testing.T) {
 		t.Fatal("data cleanup on persistence failure")
 	}
 }
+
+func TestSecretPreparationFailureCanRetry(t *testing.T) {
+	a, r := setup(t)
+	ctx := context.Background()
+	p, err := a.Plan(ctx, fixture())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, _ := a.Store.Dir("dev")
+	secretDir := filepath.Join(dir, "secrets")
+	if err = os.Symlink(t.TempDir(), secretDir); err != nil {
+		t.Fatal(err)
+	}
+	if err = a.Apply(ctx, a.PlanPath(p)); err == nil {
+		t.Fatal("unsafe secret directory accepted")
+	}
+	if r.upCalls != 0 {
+		t.Fatal("runtime started before secrets")
+	}
+	if err = os.Remove(secretDir); err != nil {
+		t.Fatal(err)
+	}
+	p, err = a.Plan(ctx, fixture())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = a.Apply(ctx, a.PlanPath(p)); err != nil {
+		t.Fatal(err)
+	}
+}
+func TestChangedCredentialsInvalidatePlan(t *testing.T) {
+	a, r := setup(t)
+	ctx := context.Background()
+	p, err := a.Plan(ctx, fixture())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = a.Apply(ctx, a.PlanPath(p)); err != nil {
+		t.Fatal(err)
+	}
+	p, err = a.Plan(ctx, fixture())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, _ := a.Store.Dir("dev")
+	if err = state.Atomic(filepath.Join(dir, "secrets", "db.password"), []byte(strings.Repeat("f", 64)), 0444); err != nil {
+		t.Fatal(err)
+	}
+	if err = a.Apply(ctx, a.PlanPath(p)); err == nil {
+		t.Fatal("changed credential accepted")
+	}
+	if r.upCalls != 1 {
+		t.Fatal("runtime changed")
+	}
+	if _, err = a.Plan(ctx, fixture()); err == nil {
+		t.Fatal("silently adopted rotated credential")
+	}
+}

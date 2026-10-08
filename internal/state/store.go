@@ -231,3 +231,25 @@ func EnsureSecrets(dir string, s spec.Spec, previous *spec.Spec) error {
 	}
 	return nil
 }
+
+// SecretsHash detects changes to managed credential files without returning their values.
+func SecretsHash(dir string, s *spec.Spec) (string, error) {
+	if s == nil {
+		return spec.Hash(map[string]string{}), nil
+	}
+	values := map[string]string{}
+	for _, v := range s.Services {
+		files := []string{v.Name + ".password"}
+		if v.Template == "redis" {
+			files = append(files, v.Name+".acl")
+		}
+		for _, name := range files {
+			b, err := ReadBytes(filepath.Join(dir, "secrets", name), 1024)
+			if err != nil {
+				return "", fmt.Errorf("managed credentials unavailable for %s", v.Name)
+			}
+			values[name] = spec.Hash(string(b))
+		}
+	}
+	return spec.Hash(values), nil
+}

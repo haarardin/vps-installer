@@ -115,7 +115,7 @@ Directories are mode 0700. JSON state and normal secret files are 0600. The Post
 ## Reliability model
 
 - Each environment has a random ID, unique Compose project name and ownership labels.
-- Changes are planned against the state revision, local daemon identity and observed resources.
+- Changes are planned against the state revision, local daemon identity, credential fingerprints and observed resources.
 - Images resolve to digests; subsequent plans reuse existing image locks.
 - Apply regenerates Compose from validated typed inputs; it does not execute an edited generated manifest.
 - Exclusive OS file locks prevent concurrent mutations using the same state root.

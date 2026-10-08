@@ -19,7 +19,7 @@ The initial architecture proposal describes a larger target. This version implem
 
 1. Plan validates spec and changes, checks local target and ownership, renders/resolves/pins/validates Compose, writes the saved plan.
 2. Apply validates the plan, locks the state, checks base revision/target/observation, regenerates the artifact, writes an applying operation record and state revision.
-3. Ensure stable credentials, validate generated config, run Compose and inspect health.
+3. Ensure stable credentials, then persist the managed spec and credential fingerprints before running Compose. A failed first-time credential preparation remains retryable. Validate generated config, run Compose and inspect health.
 4. Record the outcome; only healthy `up` updates last-successful spec. A failure after runtime success but before durable state completion is reported as a persistence failure requiring inspection.
 
 A process killed mid-operation may leave `applying` in the journal. It never implies that Docker did nothing. Generate a fresh plan after inspection; do not replay an old plan. The operation journal intentionally stores phase metadata rather than raw command output or model prompts.

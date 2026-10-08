@@ -30,6 +30,7 @@ type App struct {
 	WaitSeconds int
 }
 type Record struct {
+	SecretsHash    string            `json:"secrets_hash,omitempty"`
 	Version        int               `json:"version"`
 	ID             string            `json:"id"`
 	Name           string            `json:"name"`
@@ -42,6 +43,7 @@ type Record struct {
 	Operation      string            `json:"operation,omitempty"`
 }
 type Plan struct {
+	SecretsHash     string            `json:"secrets_hash"`
 	Version         int               `json:"version"`
 	ID              string            `json:"id"`
 	Name            string            `json:"name"`
@@ -118,6 +120,13 @@ func (a App) makePlan(ctx context.Context, name string, s spec.Spec, action stri
 		s = *r.Managed
 	}
 	s = spec.Normalize(s)
+	credentialHash, err := state.SecretsHash(dir, r.Managed)
+	if err != nil {
+		return p, err
+	}
+	if r.Managed != nil && credentialHash != r.SecretsHash {
+		return p, errors.New("managed credentials changed; restore original files")
+	}
 	changes, err := spec.Diff(r.Managed, s)
 	if err != nil {
 		return p, err
@@ -184,7 +193,7 @@ func (a App) makePlan(ctx context.Context, name string, s spec.Spec, action stri
 	} else if len(changes) == 0 {
 		changes = []spec.Change{{Service: "*", Kind: "reconcile", Details: "ensure services are running and healthy; retain data"}}
 	}
-	p = Plan{Version: 1, ID: id, Name: name, EnvironmentID: r.ID, Action: action, BaseRevision: r.Revision, Target: t, Spec: s, Images: images, ObservationHash: spec.Hash(observed.Stable()), ManifestHash: spec.Hash(string(raw)), Renderer: compose.RendererVersion, Changes: changes}
+	p = Plan{SecretsHash: credentialHash, Version: 1, ID: id, Name: name, EnvironmentID: r.ID, Action: action, BaseRevision: r.Revision, Target: t, Spec: s, Images: images, ObservationHash: spec.Hash(observed.Stable()), ManifestHash: spec.Hash(string(raw)), Renderer: compose.RendererVersion, Changes: changes}
 	p.Fingerprint = p.hash()
 	if err = state.Write(filepath.Join(planDir, "plan.json"), p); err != nil {
 		return p, err
@@ -220,6 +229,13 @@ func (a App) Apply(ctx context.Context, path string) error {
 	r, err := load(dir, p.Name, false)
 	if err != nil {
 		return err
+	}
+	credentialHash, err := state.SecretsHash(dir, r.Managed)
+	if err != nil {
+		return err
+	}
+	if credentialHash != p.SecretsHash || (r.Managed != nil && credentialHash != r.SecretsHash) {
+		return errors.New("PlanStale: managed credentials changed")
 	}
 	if r.ID != p.EnvironmentID || r.Revision != p.BaseRevision {
 		return errors.New("PlanStale: state revision changed")
@@ -273,14 +289,23 @@ func (a App) Apply(ctx context.Context, path string) error {
 	r.Phase = "applying"
 	r.Operation = opID
 	r.Target = &t
-	r.Managed = &p.Spec
-	r.Images = p.Images
 	if err = state.Write(filepath.Join(dir, "state.json"), r); err != nil {
 		return err
 	}
 	perform := func() error {
 		if p.Action == "up" {
 			if err := state.EnsureSecrets(dir, p.Spec, previous); err != nil {
+				return err
+			}
+			// Only mark services as managed after their reusable credentials exist.
+			// A crash during first-time secret preparation can then be retried.
+			r.SecretsHash, err = state.SecretsHash(dir, &p.Spec)
+			if err != nil {
+				return err
+			}
+			r.Managed = &p.Spec
+			r.Images = p.Images
+			if err = state.Write(filepath.Join(dir, "state.json"), r); err != nil {
 				return err
 			}
 			if err := a.Runtime.Validate(ctx, Project(r.ID), manifest); err != nil {
@@ -313,7 +338,19 @@ func (a App) Apply(ctx context.Context, path string) error {
 			}
 			return nil
 		}
-		return a.Runtime.Down(ctx, Project(r.ID), manifest)
+		if err := a.Runtime.Down(ctx, Project(r.ID), manifest); err != nil {
+			return err
+		}
+		remaining, err := a.Runtime.Observe(ctx, Project(r.ID), r.ID)
+		if err != nil {
+			return err
+		}
+		for _, resource := range remaining {
+			if resource.Kind != "volume" {
+				return errors.New("DownIncomplete: runtime resources remain")
+			}
+		}
+		return nil
 	}
 	effectErr := perform()
 	if effectErr != nil {
